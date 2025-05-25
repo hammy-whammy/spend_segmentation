@@ -1,0 +1,42 @@
+# JICAP Vendor Classification Automation System
+# Essential Production Dependencies
+
+# Web Framework
+streamlit>=1.44.0
+
+# Data Processing & Analysis
+pandas>=1.5.0
+numpy>=1.20.0
+
+# File Handling
+openpyxl>=3.0.0
+pyxlsb>=1.0.0
+xlsxwriter>=3.1.0
+
+# HTTP Requests & Web Scraping
+requests>=2.31.0
+playwright>=1.50.0
+aiohttp>=3.8.0
+
+# Date/Time Utilities
+python-dateutil>=2.8.0
+
+# Type Extensions
+typing-extensions>=4.0.0
+
+# Development & Testing Dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# Code Quality (Development)
+black>=23.0.0
+flake8>=6.0.0
+
+# Optional: Enhanced Web Scraping (if needed)
+# beautifulsoup4>=4.10.0
+# lxml>=4.6.0
+# selenium>=4.0.0
+
+# Optional: Enhanced Data Processing (if needed)
+# pyarrow>=10.0.0
+# fastparquet>=0.8.0
