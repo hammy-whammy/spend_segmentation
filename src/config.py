@@ -26,7 +26,7 @@ class Config:
     MAX_CONSECUTIVE_FAILURES = 5
     
     # File upload settings
-    MAX_FILE_SIZE_MB = 50
+    MAX_FILE_SIZE_MB = 100
     SUPPORTED_FILE_TYPES = ['xlsx', 'xlsb', 'csv']
     
     # Country mappings

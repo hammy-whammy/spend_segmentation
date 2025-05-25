@@ -46,7 +46,7 @@ A web-based application that automates vendor classification by processing uploa
 
 **FR-1: File Upload & Processing**
 - Support multiple file formats (.xlsx, .xlsb, .csv)
-- File size limit: 50MB
+- File size limit: 100MB
 - Automatic file validation and error handling
 - Column mapping interface for non-standard file structures
 

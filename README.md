@@ -112,7 +112,7 @@ For advanced users, edit `src/config.py` to modify:
 ### Common Issues
 
 **File Upload Errors**
-- Ensure file size is under 50MB
+- Ensure file size is under 100MB
 - Check file format (must be .xlsx, .xlsb, or .csv)
 - Verify file contains the required columns
 

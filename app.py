@@ -125,13 +125,13 @@ class JICAPApp:
         uploaded_file = st.file_uploader(
             "Choose your vendor list file",
             type=['xlsx', 'xlsb', 'csv'],
-            help="Supported formats: Excel (.xlsx, .xlsb) and CSV (.csv). Maximum file size: 50MB"
+            help="Supported formats: Excel (.xlsx, .xlsb) and CSV (.csv). Maximum file size: 100MB"
         )
         
         if uploaded_file is not None:
             # Validate file size
-            if uploaded_file.size > 50 * 1024 * 1024:  # 50MB
-                st.error("❌ File size exceeds 50MB limit. Please upload a smaller file.")
+            if uploaded_file.size > Config.MAX_FILE_SIZE_MB * 1024 * 1024:  # Use config value
+                st.error(f"❌ File size exceeds {Config.MAX_FILE_SIZE_MB}MB limit. Please upload a smaller file.")
                 return None
                 
             # Save uploaded file to session state
@@ -413,7 +413,7 @@ class JICAPApp:
             st.markdown("## 📋 File Requirements")
             st.markdown("""
             - **Format**: .xlsx, .xlsb, .csv
-            - **Size**: Max 50MB
+            - **Size**: Max 100MB
             - **Columns**: Country, SIREN number
             """)
             
