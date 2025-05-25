@@ -15,6 +15,9 @@ ENV/
 uploads/
 temp/
 
+# Development environment files
+current_requirements.txt
+
 # Logs and backups
 logs/
 backups/
