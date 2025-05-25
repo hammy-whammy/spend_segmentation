@@ -57,9 +57,10 @@ The application will open in your default web browser at `http://localhost:8501`
 ### 3. Usage Workflow
 
 1. **Upload**: Drag and drop your vendor list file (Excel or CSV)
-2. **Map Columns**: Select which columns contain country and SIREN data
-3. **Process**: Click "Start Processing" and monitor real-time progress
-4. **Download**: Get your updated database and processing logs
+2. **Select Sheet**: For Excel files with multiple sheets, choose the sheet to process
+3. **Map Columns**: Select which columns contain country and SIREN data
+4. **Process**: Click "Start Processing" and monitor real-time progress
+5. **Download**: Get your updated database and processing logs
 
 ## File Requirements
 
@@ -68,6 +69,8 @@ The application will open in your default web browser at `http://localhost:8501`
 Your vendor list file should contain at minimum:
 - **Country Column**: Country codes (FR, BE, DK)
 - **SIREN Column**: Company identification numbers
+
+**For Excel files:** If your file contains multiple sheets, you'll be able to select which sheet to process.
 
 Example structure:
 ```csv

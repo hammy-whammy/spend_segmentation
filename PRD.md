@@ -48,6 +48,7 @@ A web-based application that automates vendor classification by processing uploa
 - Support multiple file formats (.xlsx, .xlsb, .csv)
 - File size limit: 100MB
 - Automatic file validation and error handling
+- Excel sheet selection for multi-sheet files
 - Column mapping interface for non-standard file structures
 
 **FR-2: Interactive Column Selection**

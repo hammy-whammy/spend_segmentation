@@ -96,6 +96,10 @@ class JICAPApp:
             st.session_state.processing_complete = False
         if 'uploaded_file' not in st.session_state:
             st.session_state.uploaded_file = None
+        if 'selected_sheet' not in st.session_state:
+            st.session_state.selected_sheet = None
+        if 'available_sheets' not in st.session_state:
+            st.session_state.available_sheets = []
         if 'column_mapping' not in st.session_state:
             st.session_state.column_mapping = {}
         if 'processing_results' not in st.session_state:
@@ -140,17 +144,116 @@ class JICAPApp:
             # Display file info
             st.success(f"✅ File uploaded successfully: {uploaded_file.name} ({uploaded_file.size / 1024 / 1024:.2f} MB)")
             
-            # Preview file content
-            try:
-                df = self.file_handler.read_file(uploaded_file)
-                st.markdown("### 👀 File Preview")
-                st.dataframe(df.head(10), use_container_width=True)
-                return df
-            except Exception as e:
-                st.error(f"❌ Error reading file: {str(e)}")
-                return None
+            # Check if it's an Excel file and handle sheet selection
+            if self.file_handler.is_excel_file(uploaded_file):
+                return self.render_sheet_selection(uploaded_file)
+            else:
+                # For CSV files, read directly
+                try:
+                    df = self.file_handler.read_file(uploaded_file)
+                    st.markdown("### 👀 File Preview")
+                    st.dataframe(df.head(10), use_container_width=True)
+                    return df
+                except Exception as e:
+                    st.error(f"❌ Error reading file: {str(e)}")
+                    return None
         
         return None
+
+    def render_sheet_selection(self, uploaded_file):
+        """Render sheet selection for Excel files"""
+        try:
+            # Get available sheets
+            available_sheets = self.file_handler.get_excel_sheet_names(uploaded_file)
+            st.session_state.available_sheets = available_sheets
+            
+            if len(available_sheets) == 1:
+                # Only one sheet, select it automatically
+                selected_sheet = available_sheets[0]
+                st.session_state.selected_sheet = selected_sheet
+                st.info(f"📄 Found 1 sheet: **{selected_sheet}** (automatically selected)")
+            else:
+                # Multiple sheets, let user choose
+                st.markdown("### 📄 Sheet Selection")
+                st.info(f"📊 Found {len(available_sheets)} sheets in the Excel file. Please select which sheet to process:")
+                
+                # Create columns for better layout
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    selected_sheet = st.selectbox(
+                        "Select the sheet to process:",
+                        options=available_sheets,
+                        key="sheet_selector",
+                        help="Choose the sheet that contains your vendor data"
+                    )
+                
+                with col2:
+                    # Show sheet info button
+                    if st.button("📋 Preview Sheets", help="Preview the first few rows of each sheet"):
+                        self.show_sheet_preview(uploaded_file, available_sheets)
+                
+                st.session_state.selected_sheet = selected_sheet
+            
+            # Read the selected sheet and show preview
+            if st.session_state.selected_sheet:
+                try:
+                    df = self.file_handler.read_excel_sheet(uploaded_file, st.session_state.selected_sheet)
+                    
+                    # Show sheet info
+                    st.markdown(f"### 👀 Preview of Sheet: **{st.session_state.selected_sheet}**")
+                    
+                    # Display sheet statistics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Rows", len(df))
+                    with col2:
+                        st.metric("Columns", len(df.columns))
+                    with col3:
+                        st.metric("Sheet", st.session_state.selected_sheet)
+                    
+                    # Show data preview
+                    st.dataframe(df.head(10), use_container_width=True)
+                    
+                    return df
+                    
+                except Exception as e:
+                    st.error(f"❌ Error reading sheet '{st.session_state.selected_sheet}': {str(e)}")
+                    return None
+            
+        except Exception as e:
+            st.error(f"❌ Error processing Excel file: {str(e)}")
+            return None
+        
+        return None
+
+    def show_sheet_preview(self, uploaded_file, sheet_names):
+        """Show a preview of all sheets in the Excel file"""
+        st.markdown("### 📊 Sheet Previews")
+        
+        for sheet_name in sheet_names:
+            try:
+                df = self.file_handler.read_excel_sheet(uploaded_file, sheet_name)
+                
+                with st.expander(f"📄 {sheet_name} ({len(df)} rows, {len(df.columns)} columns)"):
+                    if len(df) > 0:
+                        st.dataframe(df.head(5), use_container_width=True)
+                        
+                        # Show column info
+                        st.markdown("**Columns:**")
+                        cols_display = ", ".join(df.columns[:10])
+                        if len(df.columns) > 10:
+                            cols_display += f" ... (+{len(df.columns) - 10} more)"
+                        st.text(cols_display)
+                    else:
+                        st.warning("This sheet appears to be empty.")
+                        
+            except Exception as e:
+                with st.expander(f"❌ {sheet_name} (Error reading sheet)"):
+                    st.error(f"Could not read sheet: {str(e)}")
+        
+        # Reset file pointer for subsequent operations
+        uploaded_file.seek(0)
 
     def render_column_mapping(self, df: pd.DataFrame):
         """Render the column mapping interface"""
@@ -398,9 +501,10 @@ class JICAPApp:
             st.markdown("## 📖 Quick Guide")
             st.markdown("""
             1. **Upload** your vendor list file
-            2. **Map** columns for country and SIREN
-            3. **Process** data automatically
-            4. **Download** updated database and logs
+            2. **Select sheet** (for Excel files with multiple sheets)
+            3. **Map** columns for country and SIREN
+            4. **Process** data automatically
+            5. **Download** updated database and logs
             """)
             
             st.markdown("## 🌍 Supported Countries")
@@ -414,6 +518,7 @@ class JICAPApp:
             st.markdown("""
             - **Format**: .xlsx, .xlsb, .csv
             - **Size**: Max 100MB
+            - **Sheets**: Excel files support multiple sheets
             - **Columns**: Country, SIREN number
             """)
             

@@ -192,6 +192,108 @@ class FileHandler:
             self.logger.error(f"Error exporting DataFrame: {str(e)}")
             raise
     
+    def get_excel_sheet_names(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile]) -> list:
+        """
+        Get all sheet names from an Excel file
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            
+        Returns:
+            List of sheet names
+            
+        Raises:
+            ValueError: If file is not an Excel file
+            Exception: If file reading fails
+        """
+        try:
+            if isinstance(file_input, str):
+                # File path string
+                file_path = Path(file_input)
+                if not file_path.exists():
+                    raise FileNotFoundError(f"File not found: {file_input}")
+                
+                extension = file_path.suffix.lower()
+                if extension not in ['.xlsx', '.xlsb']:
+                    raise ValueError(f"File is not an Excel file: {extension}")
+                
+                excel_file = pd.ExcelFile(file_path)
+                return excel_file.sheet_names
+                
+            else:
+                # Streamlit uploaded file
+                file_extension = Path(file_input.name).suffix.lower()
+                if file_extension not in ['.xlsx', '.xlsb']:
+                    raise ValueError(f"File is not an Excel file: {file_extension}")
+                
+                excel_file = pd.ExcelFile(file_input)
+                return excel_file.sheet_names
+                
+        except Exception as e:
+            self.logger.error(f"Error getting Excel sheet names: {str(e)}")
+            raise
+    
+    def read_excel_sheet(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile], 
+                        sheet_name: str) -> pd.DataFrame:
+        """
+        Read a specific sheet from an Excel file
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            sheet_name: Name of the sheet to read
+            
+        Returns:
+            pandas DataFrame
+            
+        Raises:
+            ValueError: If file is not an Excel file or sheet doesn't exist
+            Exception: If file reading fails
+        """
+        try:
+            if isinstance(file_input, str):
+                # File path string
+                file_path = Path(file_input)
+                if not file_path.exists():
+                    raise FileNotFoundError(f"File not found: {file_input}")
+                
+                extension = file_path.suffix.lower()
+                if extension not in ['.xlsx', '.xlsb']:
+                    raise ValueError(f"File is not an Excel file: {extension}")
+                
+                return pd.read_excel(file_path, sheet_name=sheet_name)
+                
+            else:
+                # Streamlit uploaded file
+                file_extension = Path(file_input.name).suffix.lower()
+                if file_extension not in ['.xlsx', '.xlsb']:
+                    raise ValueError(f"File is not an Excel file: {file_extension}")
+                
+                return pd.read_excel(file_input, sheet_name=sheet_name)
+                
+        except Exception as e:
+            self.logger.error(f"Error reading Excel sheet '{sheet_name}': {str(e)}")
+            raise
+
+    def is_excel_file(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile]) -> bool:
+        """
+        Check if the file is an Excel file
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            
+        Returns:
+            True if file is Excel, False otherwise
+        """
+        try:
+            if isinstance(file_input, str):
+                extension = Path(file_input).suffix.lower()
+            else:
+                extension = Path(file_input.name).suffix.lower()
+            
+            return extension in ['.xlsx', '.xlsb']
+        except:
+            return False
+
     def create_sample_template(self) -> pd.DataFrame:
         """Create a sample template DataFrame for user reference"""
         sample_data = {
