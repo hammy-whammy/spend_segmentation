@@ -438,6 +438,85 @@ class FileHandler:
                 'error': str(e)
             }
 
+    def load_filtered_dataframe_optimized(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile], 
+                                         sheet_name: Optional[str], country_column: str, siren_column: str) -> pd.DataFrame:
+        """
+        Load only the required columns and apply filtering immediately for maximum performance
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            sheet_name: Name of the sheet to read (None for CSV files)
+            country_column: Name of the country column
+            siren_column: Name of the SIREN column
+            
+        Returns:
+            Filtered pandas DataFrame with only relevant records
+        """
+        try:
+            from .config import Config
+            
+            self.logger.info(f"Loading optimized filtered DataFrame (sheet: {sheet_name})")
+            
+            # Load only the required columns to save memory
+            required_columns = [country_column, siren_column]
+            
+            # Load data with only required columns
+            if sheet_name:
+                # Excel file with specific sheet
+                if isinstance(file_input, str):
+                    df = pd.read_excel(file_input, sheet_name=sheet_name, usecols=required_columns)
+                else:
+                    df = pd.read_excel(file_input, sheet_name=sheet_name, usecols=required_columns)
+                    file_input.seek(0)
+            else:
+                # CSV file
+                if isinstance(file_input, str):
+                    df = pd.read_csv(file_input, usecols=required_columns)
+                else:
+                    file_input.seek(0)
+                    df = pd.read_csv(file_input, usecols=required_columns)
+                    file_input.seek(0)
+            
+            # Standardize column names for processing
+            df_filtered = pd.DataFrame({
+                'Vendor Country': df[country_column],
+                'Company SIREN': df[siren_column]
+            })
+            
+            # Apply same filtering logic as _prepare_data() but early
+            initial_count = len(df_filtered)
+            self.logger.info(f"Initial records loaded: {initial_count}")
+            
+            # Clean and validate data
+            df_filtered = df_filtered.dropna(subset=['Vendor Country', 'Company SIREN'])
+            df_filtered['Company SIREN'] = df_filtered['Company SIREN'].astype(str).str.strip()
+            df_filtered['Vendor Country'] = df_filtered['Vendor Country'].astype(str).str.strip().str.upper()
+            
+            # Filter to supported countries IMMEDIATELY
+            supported_mask = df_filtered['Vendor Country'].apply(Config.is_supported_country)
+            unsupported_count = (~supported_mask).sum()
+            
+            if unsupported_count > 0:
+                unsupported_countries = df_filtered[~supported_mask]['Vendor Country'].unique()
+                self.logger.info(f"Filtering out {unsupported_count} records from unsupported countries: {list(unsupported_countries)}")
+            
+            df_filtered = df_filtered[supported_mask]
+            
+            # Remove duplicates by SIREN
+            df_filtered = df_filtered.drop_duplicates(subset=['Company SIREN'])
+            final_count = len(df_filtered)
+            
+            if initial_count != final_count:
+                self.logger.info(f"Filtered data: {initial_count} → {final_count} records "
+                               f"(removed {initial_count - final_count} records)")
+            
+            self.logger.info(f"Successfully loaded and filtered {final_count} records for processing")
+            return df_filtered
+                
+        except Exception as e:
+            self.logger.error(f"Error loading filtered DataFrame: {str(e)}")
+            raise
+
     def load_full_dataframe_on_demand(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile], 
                                      sheet_name: Optional[str] = None) -> pd.DataFrame:
         """
@@ -473,3 +552,117 @@ class FileHandler:
             'Additional Column 2': ['Data A', 'Data B', 'Data C', 'Data D', 'Data E']
         }
         return pd.DataFrame(sample_data)
+
+    def estimate_filtered_record_count(self, file_input, sheet_name: Optional[str], 
+                                      country_column: str, siren_column: str, 
+                                      sample_size: int = 10000) -> dict:
+        """
+        Efficiently estimate the number of records that will actually be processed
+        after applying country filtering and SIREN deduplication
+        
+        Args:
+            file_input: Uploaded file object
+            sheet_name: Excel sheet name (None for CSV)
+            country_column: Name of the country column
+            siren_column: Name of the SIREN column
+            sample_size: Size of sample to analyze for estimation
+            
+        Returns:
+            Dictionary with estimation details
+        """
+        try:
+            from .config import Config
+            
+            # Get total record count first
+            if sheet_name:
+                sheet_info = self.get_sheet_info_lightweight(file_input, sheet_name)
+                total_records = sheet_info['rows']
+            else:
+                file_input.seek(0)
+                total_records = sum(1 for line in file_input) - 1  # Subtract header
+                file_input.seek(0)
+            
+            # If file is small, analyze the whole thing
+            analyze_size = min(sample_size, total_records)
+            
+            # Load sample for analysis
+            if sheet_name:
+                # Excel file - read first N rows
+                df_sample = pd.read_excel(file_input, sheet_name=sheet_name, nrows=analyze_size)
+            else:
+                # CSV file - read first N rows
+                file_input.seek(0)
+                df_sample = pd.read_csv(file_input, nrows=analyze_size)
+                file_input.seek(0)
+            
+            # Apply same filtering logic as _prepare_data()
+            if country_column not in df_sample.columns or siren_column not in df_sample.columns:
+                raise ValueError(f"Required columns not found: {country_column}, {siren_column}")
+            
+            # Create working copy with just the needed columns
+            sample_filtered = pd.DataFrame({
+                'Vendor Country': df_sample[country_column],
+                'Company SIREN': df_sample[siren_column]
+            })
+            
+            # Clean and validate data (same as _prepare_data)
+            sample_filtered = sample_filtered.dropna(subset=['Vendor Country', 'Company SIREN'])
+            sample_filtered['Company SIREN'] = sample_filtered['Company SIREN'].astype(str).str.strip()
+            sample_filtered['Vendor Country'] = sample_filtered['Vendor Country'].astype(str).str.strip().str.upper()
+            
+            # Filter to supported countries only
+            supported_mask = sample_filtered['Vendor Country'].apply(Config.is_supported_country)
+            sample_filtered = sample_filtered[supported_mask]
+            
+            # Remove duplicates (same as _prepare_data)
+            sample_filtered = sample_filtered.drop_duplicates(subset=['Company SIREN'])
+            
+            # Calculate ratios for estimation
+            original_sample_size = len(df_sample)
+            filtered_sample_size = len(sample_filtered)
+            
+            if original_sample_size == 0:
+                filter_ratio = 0
+            else:
+                filter_ratio = filtered_sample_size / original_sample_size
+            
+            # Estimate final count
+            estimated_filtered_count = int(total_records * filter_ratio)
+            
+            # Calculate country breakdown from sample
+            country_breakdown = sample_filtered['Vendor Country'].value_counts().to_dict()
+            country_percentages = {}
+            if len(sample_filtered) > 0:
+                for country, count in country_breakdown.items():
+                    country_percentages[country] = (count / len(sample_filtered)) * 100
+            
+            result = {
+                'total_records': total_records,
+                'estimated_filtered_count': estimated_filtered_count,
+                'filter_ratio': filter_ratio,
+                'sample_size': analyze_size,
+                'sample_filtered_size': filtered_sample_size,
+                'country_breakdown': country_breakdown,
+                'country_percentages': country_percentages,
+                'supported_countries_only': True
+            }
+            
+            self.logger.info(f"Estimated filtering: {total_records} → {estimated_filtered_count} records "
+                           f"(ratio: {filter_ratio:.3f}, sample: {analyze_size})")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error estimating filtered record count: {str(e)}")
+            # Return conservative estimate
+            return {
+                'total_records': total_records if 'total_records' in locals() else 0,
+                'estimated_filtered_count': total_records if 'total_records' in locals() else 0,
+                'filter_ratio': 1.0,
+                'sample_size': 0,
+                'sample_filtered_size': 0,
+                'country_breakdown': {},
+                'country_percentages': {},
+                'supported_countries_only': False,
+                'error': str(e)
+            }

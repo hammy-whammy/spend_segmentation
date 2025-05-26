@@ -39,7 +39,8 @@ class DataProcessor:
         }
     
     def process_vendor_list(self, df: pd.DataFrame, column_mapping: Dict[str, str], 
-                           progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+                           progress_callback: Optional[Callable] = None, 
+                           is_pre_filtered: bool = False) -> Dict[str, Any]:
         """
         Process the vendor list and update the database
         
@@ -47,6 +48,7 @@ class DataProcessor:
             df: Input DataFrame with vendor data
             column_mapping: Mapping of column names to expected fields
             progress_callback: Optional callback for progress updates
+            is_pre_filtered: If True, skips country filtering and deduplication as data is already filtered
             
         Returns:
             Dictionary with processing results
@@ -55,8 +57,8 @@ class DataProcessor:
             self.stats['start_time'] = datetime.now()
             self.processing_logger.info("Starting vendor list processing")
             
-            # Prepare data
-            processed_df = self._prepare_data(df, column_mapping)
+            # Prepare data (conditionally filter based on is_pre_filtered flag)
+            processed_df = self._prepare_data(df, column_mapping, is_pre_filtered)
             self.stats['total_records'] = len(processed_df)
             
             if len(processed_df) == 0:
@@ -126,9 +128,15 @@ class DataProcessor:
             self.processing_logger.error(traceback.format_exc())
             raise
     
-    def _prepare_data(self, df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.DataFrame:
+    def _prepare_data(self, df: pd.DataFrame, column_mapping: Dict[str, str], is_pre_filtered: bool = False) -> pd.DataFrame:
         """Prepare and validate input data"""
         try:
+            # If data is already pre-filtered, skip expensive operations
+            if is_pre_filtered:
+                self.processing_logger.info(f"Using pre-filtered data with {len(df)} records (skipping filtering)")
+                # Data is already in the correct format from load_filtered_dataframe_optimized
+                return df
+                
             # Create working copy
             processed_df = df.copy()
             

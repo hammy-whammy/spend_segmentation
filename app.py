@@ -430,34 +430,86 @@ class JICAPApp:
                 timeout_seconds = st.number_input("Timeout (seconds)", min_value=10, max_value=120, value=30)
                 concurrent_requests = st.number_input("Concurrent Requests", min_value=1, max_value=10, value=3)
         
-        # Estimate processing time based on lightweight data info
-        # For lightweight data, we need to get row count from the stored info
-        if 'lightweight' in data_info and data_info['lightweight']:
-            # This is lightweight data - we need to get row count from file info
-            if st.session_state.uploaded_file and hasattr(st.session_state.uploaded_file, 'name'):
-                try:
-                    if st.session_state.selected_sheet:
-                        # Excel file
-                        sheet_info = self.file_handler.get_sheet_info_lightweight(
-                            st.session_state.uploaded_file, 
-                            st.session_state.selected_sheet
+        # Get filtered record estimation for accurate processing time
+        with st.spinner("🔍 Analyzing data for accurate time estimation..."):
+            if 'lightweight' in data_info and data_info['lightweight']:
+                # Get column mapping from session state
+                country_column = column_mapping.get('country', '')
+                siren_column = column_mapping.get('siren', '')
+                
+                if country_column and siren_column and st.session_state.uploaded_file:
+                    try:
+                        # Get filtered record count estimation
+                        filter_estimation = self.file_handler.estimate_filtered_record_count(
+                            st.session_state.uploaded_file,
+                            st.session_state.selected_sheet if hasattr(st.session_state, 'selected_sheet') else None,
+                            country_column,
+                            siren_column
                         )
-                        total_records = sheet_info['rows']
+                        
+                        total_records = filter_estimation['total_records']
+                        filtered_records = filter_estimation['estimated_filtered_count']
+                        filter_ratio = filter_estimation['filter_ratio']
+                        
+                        # Show detailed breakdown
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("📋 Total Records", f"{total_records:,}")
+                        with col2:
+                            st.metric("✅ Records to Process", f"{filtered_records:,}")
+                        with col3:
+                            st.metric("📊 Filter Efficiency", f"{filter_ratio:.1%}")
+                        
+                        # Show country breakdown if available
+                        if filter_estimation.get('country_breakdown'):
+                            st.markdown("**Country Breakdown (estimated):**")
+                            breakdown_cols = st.columns(len(filter_estimation['country_breakdown']))
+                            for idx, (country, count) in enumerate(filter_estimation['country_breakdown'].items()):
+                                percentage = filter_estimation['country_percentages'].get(country, 0)
+                                with breakdown_cols[idx]:
+                                    st.metric(f"🏳️ {country}", f"{count:,}", f"{percentage:.1f}%")
+                        
+                    except Exception as e:
+                        st.warning(f"⚠️ Could not estimate filtered records: {str(e)}")
+                        # Fallback to raw count
+                        if st.session_state.selected_sheet:
+                            sheet_info = self.file_handler.get_sheet_info_lightweight(
+                                st.session_state.uploaded_file, 
+                                st.session_state.selected_sheet
+                            )
+                            total_records = sheet_info['rows']
+                        else:
+                            st.session_state.uploaded_file.seek(0)
+                            total_records = sum(1 for line in st.session_state.uploaded_file) - 1
+                            st.session_state.uploaded_file.seek(0)
+                        filtered_records = total_records
+                else:
+                    # No column mapping yet - use raw count
+                    if st.session_state.uploaded_file and hasattr(st.session_state.uploaded_file, 'name'):
+                        try:
+                            if st.session_state.selected_sheet:
+                                sheet_info = self.file_handler.get_sheet_info_lightweight(
+                                    st.session_state.uploaded_file, 
+                                    st.session_state.selected_sheet
+                                )
+                                total_records = sheet_info['rows']
+                            else:
+                                st.session_state.uploaded_file.seek(0)
+                                total_records = sum(1 for line in st.session_state.uploaded_file) - 1
+                                st.session_state.uploaded_file.seek(0)
+                        except:
+                            total_records = 0
                     else:
-                        # CSV file - get row count efficiently
-                        st.session_state.uploaded_file.seek(0)
-                        total_records = sum(1 for line in st.session_state.uploaded_file) - 1  # Subtract header
-                        st.session_state.uploaded_file.seek(0)
-                except:
-                    total_records = 0
+                        total_records = 0
+                    filtered_records = total_records
+                    st.warning("⚠️ Showing raw record count. Complete column mapping for accurate estimation.")
             else:
-                total_records = 0
-        else:
-            # Legacy support for direct DataFrame
-            total_records = len(data_info) if hasattr(data_info, '__len__') else 0
+                # Legacy support for direct DataFrame
+                total_records = len(data_info) if hasattr(data_info, '__len__') else 0
+                filtered_records = total_records
         
-        estimated_time = self.estimate_processing_time(total_records, concurrent_requests)
-        st.info(f"📊 Processing {total_records} records. Estimated time: {estimated_time}")
+        estimated_time = self.estimate_processing_time(filtered_records, concurrent_requests)
+        st.success(f"🚀 Ready to process {filtered_records:,} records. Estimated time: {estimated_time}")
         
         # Start processing button
         if st.button("🚀 Start Processing", type="primary", use_container_width=True):
@@ -465,7 +517,8 @@ class JICAPApp:
                 'batch_size': batch_size,
                 'retry_attempts': retry_attempts,
                 'timeout_seconds': timeout_seconds,
-                'concurrent_requests': concurrent_requests
+                'concurrent_requests': concurrent_requests,
+                'estimated_filtered_count': filtered_records  # Pass the estimated count
             })
 
     def estimate_processing_time(self, total_records: int, concurrent_requests: int) -> str:
@@ -484,25 +537,39 @@ class JICAPApp:
             return f"{hours} hours {minutes} minutes"
 
     def process_vendor_data_lightweight(self, data_info: Dict, column_mapping: Dict[str, str], config: Dict):
-        """Process vendor data - OPTIMIZED to load full DataFrame only when processing starts"""
+        """Process vendor data - OPTIMIZED to load only filtered data for processing"""
         try:
-            st.markdown("### 📂 Loading Full Data for Processing...")
+            st.markdown("### 📂 Loading Optimized Data for Processing...")
             
-            # Load the full DataFrame only now when we actually need it
+            # Get column mapping
+            country_column = column_mapping.get('country', '')
+            siren_column = column_mapping.get('siren', '')
+            
+            if not country_column or not siren_column:
+                st.error("❌ Column mapping not found. Please complete column mapping first.")
+                return
+            
+            # Load the filtered DataFrame only now when we actually need it
             if 'lightweight' in data_info and data_info['lightweight']:
-                # Load full DataFrame from stored file
+                # Use optimized loading that filters data during load
                 if st.session_state.uploaded_file:
-                    if st.session_state.selected_sheet:
-                        # Excel file with specific sheet
-                        df = self.file_handler.load_full_dataframe_on_demand(
-                            st.session_state.uploaded_file, 
-                            st.session_state.selected_sheet
-                        )
-                    else:
-                        # CSV file
-                        df = self.file_handler.load_full_dataframe_on_demand(
-                            st.session_state.uploaded_file
-                        )
+                    with st.spinner("🚀 Loading and filtering data optimally..."):
+                        if st.session_state.selected_sheet:
+                            # Excel file with specific sheet
+                            df = self.file_handler.load_filtered_dataframe_optimized(
+                                st.session_state.uploaded_file, 
+                                st.session_state.selected_sheet,
+                                country_column,
+                                siren_column
+                            )
+                        else:
+                            # CSV file
+                            df = self.file_handler.load_filtered_dataframe_optimized(
+                                st.session_state.uploaded_file,
+                                None,
+                                country_column,
+                                siren_column
+                            )
                 else:
                     st.error("❌ File information not found. Please re-upload the file.")
                     return
@@ -510,17 +577,26 @@ class JICAPApp:
                 # Legacy support - data_info is already a DataFrame
                 df = data_info
             
-            st.success(f"✅ Successfully loaded {len(df)} records for processing")
+            st.success(f"✅ Successfully loaded {len(df)} filtered records for processing")
             
-            # Now proceed with the original processing logic
-            self.process_vendor_data(df, column_mapping, config)
+            # Show breakdown of loaded data
+            if len(df) > 0:
+                country_breakdown = df['Vendor Country'].value_counts()
+                st.markdown("**Records by Country:**")
+                cols = st.columns(len(country_breakdown))
+                for i, (country, count) in enumerate(country_breakdown.items()):
+                    with cols[i]:
+                        st.metric(f"🏳️ {country}", f"{count:,}")
+            
+            # Now proceed with the original processing logic using pre-filtered data
+            self.process_vendor_data(df, column_mapping, config, is_pre_filtered=True)
             
         except Exception as e:
             self.logger.error(f"Error loading data for processing: {str(e)}")
             st.error(f"❌ Error loading data for processing: {str(e)}")
             st.error("Please try uploading the file again.")
 
-    def process_vendor_data(self, df: pd.DataFrame, column_mapping: Dict[str, str], config: Dict):
+    def process_vendor_data(self, df: pd.DataFrame, column_mapping: Dict[str, str], config: Dict, is_pre_filtered: bool = False):
         """Process the vendor data"""
         try:
             # Initialize data processor
@@ -551,7 +627,8 @@ class JICAPApp:
                 progress_callback=lambda progress, status, metrics: self.update_progress_ui(
                     progress_bar, status_text, metrics_container, log_placeholder,
                     progress, status, metrics
-                )
+                ),
+                is_pre_filtered=is_pre_filtered
             )
             
             # Store results
