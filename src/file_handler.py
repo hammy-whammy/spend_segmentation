@@ -294,6 +294,176 @@ class FileHandler:
         except:
             return False
 
+    def get_sheet_info_lightweight(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile], 
+                                  sheet_name: str) -> dict:
+        """
+        Get lightweight information about a sheet (rows, columns, sample data) without loading full DataFrame
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            sheet_name: Name of the sheet to analyze
+            
+        Returns:
+            Dictionary with sheet info (rows, columns, column_names, sample_data)
+        """
+        try:
+            # Read only first 10 rows for preview
+            if isinstance(file_input, str):
+                sample_df = pd.read_excel(file_input, sheet_name=sheet_name, nrows=10)
+                # Get total row count by reading only the first column
+                full_df_col = pd.read_excel(file_input, sheet_name=sheet_name, usecols=[0])
+                total_rows = len(full_df_col)
+            else:
+                sample_df = pd.read_excel(file_input, sheet_name=sheet_name, nrows=10)
+                # Reset and read first column only for count
+                file_input.seek(0)
+                full_df_col = pd.read_excel(file_input, sheet_name=sheet_name, usecols=[0])
+                total_rows = len(full_df_col)
+                file_input.seek(0)  # Reset for subsequent operations
+            
+            return {
+                'rows': total_rows,
+                'columns': len(sample_df.columns),
+                'column_names': list(sample_df.columns),
+                'sample_data': sample_df
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting sheet info for '{sheet_name}': {str(e)}")
+            return {
+                'rows': 0,
+                'columns': 0,
+                'column_names': [],
+                'sample_data': pd.DataFrame(),
+                'error': str(e)
+            }
+
+    def get_column_sample_values(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile], 
+                                sheet_name: str, column_name: str, sample_size: int = 10) -> list:
+        """
+        Get sample values from a specific column without loading the full DataFrame
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            sheet_name: Name of the sheet (None for CSV files)
+            column_name: Name of the column to sample
+            sample_size: Number of sample values to return
+            
+        Returns:
+            List of sample values
+        """
+        try:
+            if isinstance(file_input, str):
+                if sheet_name:
+                    # Excel file
+                    df = pd.read_excel(file_input, sheet_name=sheet_name, usecols=[column_name], nrows=1000)
+                else:
+                    # CSV file
+                    df = pd.read_csv(file_input, usecols=[column_name], nrows=1000)
+            else:
+                if sheet_name:
+                    # Excel file
+                    df = pd.read_excel(file_input, sheet_name=sheet_name, usecols=[column_name], nrows=1000)
+                    file_input.seek(0)
+                else:
+                    # CSV file
+                    df = pd.read_csv(file_input, usecols=[column_name], nrows=1000)
+                    file_input.seek(0)
+            
+            # Get unique values and return sample
+            unique_values = df[column_name].dropna().unique()
+            return list(unique_values[:sample_size])
+            
+        except Exception as e:
+            self.logger.error(f"Error getting column samples for '{column_name}': {str(e)}")
+            return []
+
+    def validate_columns_lightweight(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile], 
+                                   sheet_name: str, country_column: str, siren_column: str) -> dict:
+        """
+        Validate column mapping by analyzing a sample of data without loading full DataFrame
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            sheet_name: Name of the sheet (None for CSV files)
+            country_column: Name of the country column
+            siren_column: Name of the SIREN column
+            
+        Returns:
+            Dictionary with validation results
+        """
+        try:
+            columns_to_read = [country_column, siren_column]
+            
+            if isinstance(file_input, str):
+                if sheet_name:
+                    df = pd.read_excel(file_input, sheet_name=sheet_name, usecols=columns_to_read, nrows=1000)
+                else:
+                    df = pd.read_csv(file_input, usecols=columns_to_read, nrows=1000)
+            else:
+                if sheet_name:
+                    df = pd.read_excel(file_input, sheet_name=sheet_name, usecols=columns_to_read, nrows=1000)
+                    file_input.seek(0)
+                else:
+                    df = pd.read_csv(file_input, usecols=columns_to_read, nrows=1000)
+                    file_input.seek(0)
+            
+            # Analyze country column
+            countries_in_data = df[country_column].dropna().unique()
+            supported_countries = []
+            unsupported_countries = []
+            
+            for country in countries_in_data:
+                if str(country).upper() in ['BE', 'DK', 'FR']:
+                    supported_countries.append(str(country).upper())
+                else:
+                    unsupported_countries.append(str(country))
+            
+            # Analyze SIREN column
+            siren_sample = df[siren_column].dropna().unique()[:10]
+            
+            return {
+                'supported_countries': supported_countries,
+                'unsupported_countries': unsupported_countries,
+                'siren_samples': list(siren_sample),
+                'total_sample_rows': len(df)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error validating columns: {str(e)}")
+            return {
+                'supported_countries': [],
+                'unsupported_countries': [],
+                'siren_samples': [],
+                'total_sample_rows': 0,
+                'error': str(e)
+            }
+
+    def load_full_dataframe_on_demand(self, file_input: Union[str, st.runtime.uploaded_file_manager.UploadedFile], 
+                                     sheet_name: Optional[str] = None) -> pd.DataFrame:
+        """
+        Load the complete DataFrame when actually needed for processing
+        
+        Args:
+            file_input: File path string or Streamlit uploaded file
+            sheet_name: Name of the sheet to read (None for CSV files)
+            
+        Returns:
+            Complete pandas DataFrame
+        """
+        try:
+            self.logger.info(f"Loading full DataFrame for processing (sheet: {sheet_name})")
+            
+            if sheet_name:
+                # Excel file with specific sheet
+                return self.read_excel_sheet(file_input, sheet_name)
+            else:
+                # CSV file or Excel file without sheet specification
+                return self.read_file(file_input)
+                
+        except Exception as e:
+            self.logger.error(f"Error loading full DataFrame: {str(e)}")
+            raise
+
     def create_sample_template(self) -> pd.DataFrame:
         """Create a sample template DataFrame for user reference"""
         sample_data = {

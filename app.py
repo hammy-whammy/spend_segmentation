@@ -106,6 +106,9 @@ class JICAPApp:
             st.session_state.processing_results = None
         if 'log_file_path' not in st.session_state:
             st.session_state.log_file_path = None
+        # New session state for lightweight processing
+        if 'file_data_info' not in st.session_state:
+            st.session_state.file_data_info = None
 
     def render_header(self):
         """Render the application header"""
@@ -148,12 +151,30 @@ class JICAPApp:
             if self.file_handler.is_excel_file(uploaded_file):
                 return self.render_sheet_selection(uploaded_file)
             else:
-                # For CSV files, read directly
+                # For CSV files, get lightweight info only
                 try:
-                    df = self.file_handler.read_file(uploaded_file)
+                    # Read only first 10 rows for preview
+                    preview_df = pd.read_csv(uploaded_file, nrows=10)
+                    
+                    # Get total row count efficiently
+                    uploaded_file.seek(0)
+                    total_rows = sum(1 for line in uploaded_file) - 1  # Subtract header
+                    uploaded_file.seek(0)
+                    
+                    # Show preview info
                     st.markdown("### 👀 File Preview")
-                    st.dataframe(df.head(10), use_container_width=True)
-                    return df
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Rows", total_rows)
+                    with col2:
+                        st.metric("Columns", len(preview_df.columns))
+                    
+                    # Show sample data
+                    st.dataframe(preview_df, use_container_width=True)
+                    
+                    # Return lightweight info for column mapping
+                    return {'columns': list(preview_df.columns), 'sheet_name': None, 'lightweight': True}
+                    
                 except Exception as e:
                     st.error(f"❌ Error reading file: {str(e)}")
                     return None
@@ -161,7 +182,7 @@ class JICAPApp:
         return None
 
     def render_sheet_selection(self, uploaded_file):
-        """Render sheet selection for Excel files"""
+        """Render sheet selection for Excel files - OPTIMIZED for performance"""
         try:
             # Get available sheets
             available_sheets = self.file_handler.get_excel_sheet_names(uploaded_file)
@@ -172,6 +193,26 @@ class JICAPApp:
                 selected_sheet = available_sheets[0]
                 st.session_state.selected_sheet = selected_sheet
                 st.info(f"📄 Found 1 sheet: **{selected_sheet}** (automatically selected)")
+                
+                # Get lightweight sheet info without loading full DataFrame
+                sheet_info = self.file_handler.get_sheet_info_lightweight(uploaded_file, selected_sheet)
+                
+                # Display basic info
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Rows", sheet_info['rows'])
+                with col2:
+                    st.metric("Columns", sheet_info['columns'])
+                with col3:
+                    st.metric("Sheet", selected_sheet)
+                
+                # Show lightweight preview
+                if not sheet_info['sample_data'].empty:
+                    st.dataframe(sheet_info['sample_data'], use_container_width=True)
+                
+                # Return column names only for column mapping (no full DataFrame yet)
+                return {'columns': sheet_info['column_names'], 'sheet_name': selected_sheet, 'lightweight': True}
+                
             else:
                 # Multiple sheets, let user choose
                 st.markdown("### 📄 Sheet Selection")
@@ -191,41 +232,62 @@ class JICAPApp:
                 with col2:
                     # Show sheet info button
                     if st.button("📋 Preview Sheets", help="Preview the first few rows of each sheet"):
-                        self.show_sheet_preview(uploaded_file, available_sheets)
+                        self.show_sheet_preview_lightweight(uploaded_file, available_sheets)
                 
                 st.session_state.selected_sheet = selected_sheet
-            
-            # Read the selected sheet and show preview
-            if st.session_state.selected_sheet:
-                try:
-                    df = self.file_handler.read_excel_sheet(uploaded_file, st.session_state.selected_sheet)
+                
+                # Get lightweight info for selected sheet
+                if selected_sheet:
+                    sheet_info = self.file_handler.get_sheet_info_lightweight(uploaded_file, selected_sheet)
                     
                     # Show sheet info
-                    st.markdown(f"### 👀 Preview of Sheet: **{st.session_state.selected_sheet}**")
+                    st.markdown(f"### 👀 Preview of Sheet: **{selected_sheet}**")
                     
                     # Display sheet statistics
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Rows", len(df))
+                        st.metric("Rows", sheet_info['rows'])
                     with col2:
-                        st.metric("Columns", len(df.columns))
+                        st.metric("Columns", sheet_info['columns'])
                     with col3:
-                        st.metric("Sheet", st.session_state.selected_sheet)
+                        st.metric("Sheet", selected_sheet)
                     
-                    # Show data preview
-                    st.dataframe(df.head(10), use_container_width=True)
+                    # Show lightweight preview
+                    if not sheet_info['sample_data'].empty:
+                        st.dataframe(sheet_info['sample_data'], use_container_width=True)
                     
-                    return df
-                    
-                except Exception as e:
-                    st.error(f"❌ Error reading sheet '{st.session_state.selected_sheet}': {str(e)}")
-                    return None
+                    # Return column names only for column mapping (no full DataFrame yet)
+                    return {'columns': sheet_info['column_names'], 'sheet_name': selected_sheet, 'lightweight': True}
             
         except Exception as e:
             st.error(f"❌ Error processing Excel file: {str(e)}")
             return None
         
         return None
+
+    def show_sheet_preview_lightweight(self, uploaded_file, sheet_names):
+        """Show a lightweight preview of all sheets in the Excel file"""
+        st.markdown("### 📊 Sheet Previews (Lightweight)")
+        
+        for sheet_name in sheet_names:
+            sheet_info = self.file_handler.get_sheet_info_lightweight(uploaded_file, sheet_name)
+            
+            if 'error' in sheet_info:
+                with st.expander(f"❌ {sheet_name} (Error reading sheet)"):
+                    st.error(f"Could not read sheet: {sheet_info['error']}")
+            else:
+                with st.expander(f"📄 {sheet_name} ({sheet_info['rows']} rows, {sheet_info['columns']} columns)"):
+                    if not sheet_info['sample_data'].empty:
+                        st.dataframe(sheet_info['sample_data'], use_container_width=True)
+                        
+                        # Show column info
+                        st.markdown("**Columns:**")
+                        cols_display = ", ".join(sheet_info['column_names'][:10])
+                        if len(sheet_info['column_names']) > 10:
+                            cols_display += f" ... (+{len(sheet_info['column_names']) - 10} more)"
+                        st.text(cols_display)
+                    else:
+                        st.warning("This sheet appears to be empty.")
 
     def show_sheet_preview(self, uploaded_file, sheet_names):
         """Show a preview of all sheets in the Excel file"""
@@ -255,10 +317,22 @@ class JICAPApp:
         # Reset file pointer for subsequent operations
         uploaded_file.seek(0)
 
-    def render_column_mapping(self, df: pd.DataFrame):
-        """Render the column mapping interface"""
+    def render_column_mapping(self, data_info):
+        """Render the column mapping interface - OPTIMIZED for performance"""
         st.markdown("## 🔗 Step 2: Column Mapping")
         st.markdown("Select which columns contain the vendor country and SIREN number:")
+        
+        # Handle both lightweight data info and full DataFrame
+        if isinstance(data_info, dict) and 'lightweight' in data_info:
+            # Lightweight mode - only column names available
+            columns = data_info['columns']
+            sheet_name = data_info['sheet_name']
+            is_excel = sheet_name is not None
+        else:
+            # Full DataFrame mode (legacy support)
+            columns = list(data_info.columns)
+            sheet_name = st.session_state.get('selected_sheet')
+            is_excel = sheet_name is not None
         
         col1, col2 = st.columns(2)
         
@@ -266,28 +340,42 @@ class JICAPApp:
             st.markdown("### 🌍 Vendor Country Column")
             country_column = st.selectbox(
                 "Select the column containing vendor countries:",
-                options=[''] + list(df.columns),
+                options=[''] + columns,
                 key="country_column",
                 help="This column should contain country codes like 'BE', 'DK', 'FR'"
             )
             
             if country_column:
-                # Show sample values
-                sample_values = df[country_column].dropna().unique()[:10]
+                # Get sample values efficiently
+                if is_excel and sheet_name:
+                    sample_values = self.file_handler.get_column_sample_values(
+                        st.session_state.uploaded_file, sheet_name, country_column
+                    )
+                else:
+                    sample_values = self.file_handler.get_column_sample_values(
+                        st.session_state.uploaded_file, None, country_column
+                    )
                 st.info(f"Sample values: {', '.join(map(str, sample_values))}")
         
         with col2:
             st.markdown("### 🏢 SIREN Number Column")
             siren_column = st.selectbox(
                 "Select the column containing SIREN/company numbers:",
-                options=[''] + list(df.columns),
+                options=[''] + columns,
                 key="siren_column",
                 help="This column should contain unique company identification numbers"
             )
             
             if siren_column:
-                # Show sample values
-                sample_values = df[siren_column].dropna().unique()[:10]
+                # Get sample values efficiently
+                if is_excel and sheet_name:
+                    sample_values = self.file_handler.get_column_sample_values(
+                        st.session_state.uploaded_file, sheet_name, siren_column
+                    )
+                else:
+                    sample_values = self.file_handler.get_column_sample_values(
+                        st.session_state.uploaded_file, None, siren_column
+                    )
                 st.info(f"Sample values: {', '.join(map(str, sample_values))}")
         
         # Validate mapping
@@ -305,31 +393,31 @@ class JICAPApp:
             # Show validation summary
             st.success("✅ Column mapping configured successfully!")
             
-            # Show supported countries
-            countries_in_data = df[country_column].dropna().unique()
-            supported = []
-            unsupported = []
+            # Validate columns with lightweight method
+            if is_excel and sheet_name:
+                validation_result = self.file_handler.validate_columns_lightweight(
+                    st.session_state.uploaded_file, sheet_name, country_column, siren_column
+                )
+            else:
+                validation_result = self.file_handler.validate_columns_lightweight(
+                    st.session_state.uploaded_file, None, country_column, siren_column
+                )
             
-            for country in countries_in_data:
-                if str(country).upper() in ['BE', 'DK', 'FR']:
-                    supported.append(country)
-                else:
-                    unsupported.append(country)
-            
+            # Show validation results
             col1, col2 = st.columns(2)
             with col1:
-                if supported:
-                    st.success(f"✅ Supported countries: {', '.join(supported)}")
+                if validation_result['supported_countries']:
+                    st.success(f"✅ Supported countries: {', '.join(validation_result['supported_countries'])}")
             with col2:
-                if unsupported:
-                    st.warning(f"⚠️ Unsupported countries: {', '.join(unsupported)}")
+                if validation_result['unsupported_countries']:
+                    st.warning(f"⚠️ Unsupported countries: {', '.join(validation_result['unsupported_countries'])}")
             
             return st.session_state.column_mapping
         
         return None
 
-    def render_processing_section(self, df: pd.DataFrame, column_mapping: Dict[str, str]):
-        """Render the processing section"""
+    def render_processing_section(self, data_info: Dict, column_mapping: Dict[str, str]):
+        """Render the processing section - OPTIMIZED to load data only when processing starts"""
         st.markdown("## ⚙️ Step 3: Process Vendor Data")
         
         # Processing configuration
@@ -342,14 +430,38 @@ class JICAPApp:
                 timeout_seconds = st.number_input("Timeout (seconds)", min_value=10, max_value=120, value=30)
                 concurrent_requests = st.number_input("Concurrent Requests", min_value=1, max_value=10, value=3)
         
-        # Estimate processing time
-        total_records = len(df)
+        # Estimate processing time based on lightweight data info
+        # For lightweight data, we need to get row count from the stored info
+        if 'lightweight' in data_info and data_info['lightweight']:
+            # This is lightweight data - we need to get row count from file info
+            if st.session_state.uploaded_file and hasattr(st.session_state.uploaded_file, 'name'):
+                try:
+                    if st.session_state.selected_sheet:
+                        # Excel file
+                        sheet_info = self.file_handler.get_sheet_info_lightweight(
+                            st.session_state.uploaded_file, 
+                            st.session_state.selected_sheet
+                        )
+                        total_records = sheet_info['rows']
+                    else:
+                        # CSV file - get row count efficiently
+                        st.session_state.uploaded_file.seek(0)
+                        total_records = sum(1 for line in st.session_state.uploaded_file) - 1  # Subtract header
+                        st.session_state.uploaded_file.seek(0)
+                except:
+                    total_records = 0
+            else:
+                total_records = 0
+        else:
+            # Legacy support for direct DataFrame
+            total_records = len(data_info) if hasattr(data_info, '__len__') else 0
+        
         estimated_time = self.estimate_processing_time(total_records, concurrent_requests)
         st.info(f"📊 Processing {total_records} records. Estimated time: {estimated_time}")
         
         # Start processing button
         if st.button("🚀 Start Processing", type="primary", use_container_width=True):
-            self.process_vendor_data(df, column_mapping, {
+            self.process_vendor_data_lightweight(data_info, column_mapping, {
                 'batch_size': batch_size,
                 'retry_attempts': retry_attempts,
                 'timeout_seconds': timeout_seconds,
@@ -370,6 +482,43 @@ class JICAPApp:
             hours = int(total_seconds // 3600)
             minutes = int((total_seconds % 3600) // 60)
             return f"{hours} hours {minutes} minutes"
+
+    def process_vendor_data_lightweight(self, data_info: Dict, column_mapping: Dict[str, str], config: Dict):
+        """Process vendor data - OPTIMIZED to load full DataFrame only when processing starts"""
+        try:
+            st.markdown("### 📂 Loading Full Data for Processing...")
+            
+            # Load the full DataFrame only now when we actually need it
+            if 'lightweight' in data_info and data_info['lightweight']:
+                # Load full DataFrame from stored file
+                if st.session_state.uploaded_file:
+                    if st.session_state.selected_sheet:
+                        # Excel file with specific sheet
+                        df = self.file_handler.load_full_dataframe_on_demand(
+                            st.session_state.uploaded_file, 
+                            st.session_state.selected_sheet
+                        )
+                    else:
+                        # CSV file
+                        df = self.file_handler.load_full_dataframe_on_demand(
+                            st.session_state.uploaded_file
+                        )
+                else:
+                    st.error("❌ File information not found. Please re-upload the file.")
+                    return
+            else:
+                # Legacy support - data_info is already a DataFrame
+                df = data_info
+            
+            st.success(f"✅ Successfully loaded {len(df)} records for processing")
+            
+            # Now proceed with the original processing logic
+            self.process_vendor_data(df, column_mapping, config)
+            
+        except Exception as e:
+            self.logger.error(f"Error loading data for processing: {str(e)}")
+            st.error(f"❌ Error loading data for processing: {str(e)}")
+            st.error("Please try uploading the file again.")
 
     def process_vendor_data(self, df: pd.DataFrame, column_mapping: Dict[str, str], config: Dict):
         """Process the vendor data"""
@@ -531,7 +680,7 @@ class JICAPApp:
             """)
 
     def run(self):
-        """Main application entry point"""
+        """Main application entry point - OPTIMIZED for lightweight processing"""
         try:
             # Render header
             self.render_header()
@@ -539,14 +688,14 @@ class JICAPApp:
             # Render sidebar
             self.render_sidebar()
             
-            # Main workflow
-            df = self.render_file_upload()
+            # Main workflow - now uses lightweight data structures
+            data_info = self.render_file_upload()
             
-            if df is not None:
-                column_mapping = self.render_column_mapping(df)
+            if data_info is not None:
+                column_mapping = self.render_column_mapping(data_info)
                 
                 if column_mapping:
-                    self.render_processing_section(df, column_mapping)
+                    self.render_processing_section(data_info, column_mapping)
             
             # Always render results section (will show if processing is complete)
             self.render_results_section()
