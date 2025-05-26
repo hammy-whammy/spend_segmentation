@@ -132,7 +132,8 @@ class JICAPApp:
         uploaded_file = st.file_uploader(
             "Choose your vendor list file",
             type=['xlsx', 'xlsb', 'csv'],
-            help="Supported formats: Excel (.xlsx, .xlsb) and CSV (.csv). Maximum file size: 100MB"
+            help="Supported formats: Excel (.xlsx, .xlsb) and CSV (.csv). Maximum file size: 100MB",
+            key="vendor_file_uploader"
         )
         
         if uploaded_file is not None:
@@ -231,7 +232,7 @@ class JICAPApp:
                 
                 with col2:
                     # Show sheet info button
-                    if st.button("📋 Preview Sheets", help="Preview the first few rows of each sheet"):
+                    if st.button("📋 Preview Sheets", help="Preview the first few rows of each sheet", key="preview_sheets_btn"):
                         self.show_sheet_preview_lightweight(uploaded_file, available_sheets)
                 
                 st.session_state.selected_sheet = selected_sheet
@@ -424,11 +425,11 @@ class JICAPApp:
         with st.expander("🔧 Processing Configuration", expanded=True):
             col1, col2 = st.columns(2)
             with col1:
-                batch_size = st.number_input("Batch Size", min_value=10, max_value=1000, value=100, step=10)
-                retry_attempts = st.number_input("Retry Attempts", min_value=1, max_value=5, value=3)
+                batch_size = st.number_input("Batch Size", min_value=10, max_value=1000, value=100, step=10, key="batch_size_input")
+                retry_attempts = st.number_input("Retry Attempts", min_value=1, max_value=5, value=3, key="retry_attempts_input")
             with col2:
-                timeout_seconds = st.number_input("Timeout (seconds)", min_value=10, max_value=120, value=30)
-                concurrent_requests = st.number_input("Concurrent Requests", min_value=1, max_value=10, value=3)
+                timeout_seconds = st.number_input("Timeout (seconds)", min_value=10, max_value=120, value=30, key="timeout_seconds_input")
+                concurrent_requests = st.number_input("Concurrent Requests", min_value=1, max_value=10, value=3, key="concurrent_requests_input")
         
         # Get filtered record estimation for accurate processing time
         with st.spinner("🔍 Analyzing data for accurate time estimation..."):
@@ -512,7 +513,7 @@ class JICAPApp:
         st.success(f"🚀 Ready to process {filtered_records:,} records. Estimated time: {estimated_time}")
         
         # Start processing button
-        if st.button("🚀 Start Processing", type="primary", use_container_width=True):
+        if st.button("🚀 Start Processing", type="primary", use_container_width=True, key="start_processing_btn"):
             self.process_vendor_data_lightweight(data_info, column_mapping, {
                 'batch_size': batch_size,
                 'retry_attempts': retry_attempts,
@@ -664,7 +665,7 @@ class JICAPApp:
         # Update log display
         if 'recent_logs' in metrics:
             log_text = '\n'.join(metrics['recent_logs'][-20:])  # Show last 20 log entries
-            log_placeholder.text_area("Recent Log Entries", log_text, height=200)
+            log_placeholder.text_area("Recent Log Entries", log_text, height=200, key="processing_log_display")
 
     def render_results_section(self):
         """Render the results section"""
@@ -699,13 +700,14 @@ class JICAPApp:
         
         with col1:
             # Download updated database
-            if st.button("📊 Download Updated Database", use_container_width=True):
+            if st.button("📊 Download Updated Database", use_container_width=True, key="download_db_btn"):
                 updated_db = self.db_manager.export_database()
                 st.download_button(
                     label="💾 Download JICAP Database",
                     data=updated_db,
                     file_name=f"JICAP_Database_Updated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_database_file"
                 )
         
         with col2:
@@ -718,7 +720,8 @@ class JICAPApp:
                     label="📋 Download Processing Log",
                     data=log_content,
                     file_name=f"processing_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain"
+                    mime="text/plain",
+                    key="download_log_file"
                 )
 
     def render_sidebar(self):
@@ -780,7 +783,7 @@ class JICAPApp:
             # Reset button
             if st.session_state.processing_complete:
                 st.markdown("---")
-                if st.button("🔄 Start New Processing", type="secondary"):
+                if st.button("🔄 Start New Processing", type="secondary", key="reset_processing_btn"):
                     # Reset session state
                     for key in list(st.session_state.keys()):
                         del st.session_state[key]
